@@ -15603,14 +15603,22 @@ function getPRDetails() {
 }
 function getDiff(owner, repo, pull_number) {
     return __awaiter(this, void 0, void 0, function* () {
-        const response = yield octokit.pulls.get({
-            owner,
-            repo,
-            pull_number,
-            mediaType: { format: "diff" },
-        });
-        // @ts-expect-error - response.data is a string
-        return response.data;
+        try {
+            const response = yield octokit.pulls.get({
+                owner,
+                repo,
+                pull_number,
+                mediaType: { format: "diff" },
+            });
+            // @ts-expect-error - response.data is a string when mediaType format is diff
+            const diffData = response.data;
+            console.log(`Retrieved diff, size: ${diffData.length} characters`);
+            return diffData;
+        }
+        catch (error) {
+            console.error("Error fetching diff:", error);
+            return null;
+        }
     });
 }
 function analyzeCode(parsedDiff, prDetails) {
@@ -15723,31 +15731,21 @@ function main() {
         const prDetails = yield getPRDetails();
         let diff;
         const eventData = JSON.parse((0, fs_1.readFileSync)((_a = process.env.GITHUB_EVENT_PATH) !== null && _a !== void 0 ? _a : "", "utf8"));
-        if (eventData.action === "opened") {
+        console.log(`Event action: ${eventData.action}`);
+        // Always get the full PR diff, not just incremental changes
+        if (eventData.action === "opened" || eventData.action === "synchronize") {
+            console.log(`Fetching full PR diff for PR #${prDetails.pull_number}...`);
             diff = yield getDiff(prDetails.owner, prDetails.repo, prDetails.pull_number);
         }
-        else if (eventData.action === "synchronize") {
-            const newBaseSha = eventData.before;
-            const newHeadSha = eventData.after;
-            const response = yield octokit.repos.compareCommits({
-                headers: {
-                    accept: "application/vnd.github.v3.diff",
-                },
-                owner: prDetails.owner,
-                repo: prDetails.repo,
-                base: newBaseSha,
-                head: newHeadSha,
-            });
-            diff = String(response.data);
-        }
         else {
-            console.log("Unsupported event:", process.env.GITHUB_EVENT_NAME);
+            console.log("Unsupported event:", eventData.action);
             return;
         }
         if (!diff) {
             console.log("No diff found");
             return;
         }
+        console.log(`Diff size: ${diff.length} characters`);
         const parsedDiff = (0, parse_diff_1.default)(diff);
         const excludePatterns = core
             .getInput("exclude")

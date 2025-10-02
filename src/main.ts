@@ -46,14 +46,21 @@ async function getDiff(
   repo: string,
   pull_number: number
 ): Promise<string | null> {
-  const response = await octokit.pulls.get({
-    owner,
-    repo,
-    pull_number,
-    mediaType: { format: "diff" },
-  });
-  // @ts-expect-error - response.data is a string
-  return response.data;
+  try {
+    const response = await octokit.pulls.get({
+      owner,
+      repo,
+      pull_number,
+      mediaType: { format: "diff" },
+    });
+    // @ts-expect-error - response.data is a string when mediaType format is diff
+    const diffData: string = response.data;
+    console.log(`Retrieved diff, size: ${diffData.length} characters`);
+    return diffData;
+  } catch (error) {
+    console.error("Error fetching diff:", error);
+    return null;
+  }
 }
 
 async function analyzeCode(
@@ -191,29 +198,18 @@ async function main() {
     readFileSync(process.env.GITHUB_EVENT_PATH ?? "", "utf8")
   );
 
-  if (eventData.action === "opened") {
+  console.log(`Event action: ${eventData.action}`);
+
+  // Always get the full PR diff, not just incremental changes
+  if (eventData.action === "opened" || eventData.action === "synchronize") {
+    console.log(`Fetching full PR diff for PR #${prDetails.pull_number}...`);
     diff = await getDiff(
       prDetails.owner,
       prDetails.repo,
       prDetails.pull_number
     );
-  } else if (eventData.action === "synchronize") {
-    const newBaseSha = eventData.before;
-    const newHeadSha = eventData.after;
-
-    const response = await octokit.repos.compareCommits({
-      headers: {
-        accept: "application/vnd.github.v3.diff",
-      },
-      owner: prDetails.owner,
-      repo: prDetails.repo,
-      base: newBaseSha,
-      head: newHeadSha,
-    });
-
-    diff = String(response.data);
   } else {
-    console.log("Unsupported event:", process.env.GITHUB_EVENT_NAME);
+    console.log("Unsupported event:", eventData.action);
     return;
   }
 
@@ -221,6 +217,8 @@ async function main() {
     console.log("No diff found");
     return;
   }
+
+  console.log(`Diff size: ${diff.length} characters`);
 
   const parsedDiff = parseDiff(diff);
 
