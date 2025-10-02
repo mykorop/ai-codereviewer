@@ -15630,6 +15630,8 @@ function analyzeCode(parsedDiff, prDetails) {
             console.log(`Analyzing file: ${file.to}`);
             for (const chunk of file.chunks) {
                 const prompt = createPrompt(file, chunk, prDetails);
+                console.log(`Prompt length: ${prompt.length} chars`);
+                console.log(`Chunk changes: ${chunk.changes.length} lines`);
                 const aiResponse = yield getAIResponse(prompt);
                 console.log(`AI Response for ${file.to}:`, JSON.stringify(aiResponse));
                 if (aiResponse) {
@@ -15681,23 +15683,42 @@ function getAIResponse(prompt) {
     return __awaiter(this, void 0, void 0, function* () {
         const queryConfig = {
             model: OPENAI_API_MODEL,
-            max_completion_tokens: 700,
+            max_completion_tokens: 2000, // Increased from 700
         };
         let res = "{}";
         try {
+            console.log(`Calling OpenAI API with model: ${OPENAI_API_MODEL}`);
             const response = yield openai.chat.completions.create(Object.assign(Object.assign({}, queryConfig), { messages: [
                     {
                         role: "user",
                         content: prompt,
                     },
                 ] }));
+            console.log("API Response metadata:", {
+                id: response.id,
+                model: response.model,
+                finish_reason: response.choices[0].finish_reason,
+                usage: response.usage,
+            });
             res = ((_b = (_a = response.choices[0].message) === null || _a === void 0 ? void 0 : _a.content) === null || _b === void 0 ? void 0 : _b.trim()) || "{}";
-            console.log("Raw AI Response:", res.substring(0, 500)); // Log first 500 chars
+            console.log(`Raw AI Response (${res.length} chars):`, res.substring(0, 1000));
+            // Handle empty or malformed responses
+            if (res === "{}") {
+                console.warn("AI returned empty object, treating as no reviews");
+                return [];
+            }
             // Try to extract JSON from the response if it's wrapped in markdown or text
             let jsonStr = res;
-            const jsonMatch = res.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-                jsonStr = jsonMatch[0];
+            // Check for JSON code blocks
+            const codeBlockMatch = res.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+            if (codeBlockMatch) {
+                jsonStr = codeBlockMatch[1];
+            }
+            else {
+                const jsonMatch = res.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                    jsonStr = jsonMatch[0];
+                }
             }
             const parsed = JSON.parse(jsonStr);
             console.log("Parsed AI Response:", JSON.stringify(parsed));
@@ -15705,7 +15726,7 @@ function getAIResponse(prompt) {
         }
         catch (error) {
             console.error("Error in getAIResponse:", error);
-            console.error("Failed response text:", res.substring(0, 500));
+            console.error("Failed response text:", res.substring(0, 1000));
             return null;
         }
     });
@@ -15736,6 +15757,8 @@ function createReviewComment(owner, repo, pull_number, comments) {
 function main() {
     var _a;
     return __awaiter(this, void 0, void 0, function* () {
+        console.log("=== AI Code Reviewer Started ===");
+        console.log(`Model: ${OPENAI_API_MODEL}`);
         const prDetails = yield getPRDetails();
         let diff;
         const eventData = JSON.parse((0, fs_1.readFileSync)((_a = process.env.GITHUB_EVENT_PATH) !== null && _a !== void 0 ? _a : "", "utf8"));

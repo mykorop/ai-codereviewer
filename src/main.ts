@@ -74,6 +74,9 @@ async function analyzeCode(
     console.log(`Analyzing file: ${file.to}`);
     for (const chunk of file.chunks) {
       const prompt = createPrompt(file, chunk, prDetails);
+      console.log(`Prompt length: ${prompt.length} chars`);
+      console.log(`Chunk changes: ${chunk.changes.length} lines`);
+      
       const aiResponse = await getAIResponse(prompt);
       console.log(`AI Response for ${file.to}:`, JSON.stringify(aiResponse));
       if (aiResponse) {
@@ -127,11 +130,12 @@ async function getAIResponse(prompt: string): Promise<Array<{
 }> | null> {
   const queryConfig = {
     model: OPENAI_API_MODEL,
-    max_completion_tokens: 700,
+    max_completion_tokens: 2000, // Increased from 700
   };
 
   let res = "{}";
   try {
+    console.log(`Calling OpenAI API with model: ${OPENAI_API_MODEL}`);
     const response = await openai.chat.completions.create({
       ...queryConfig,
       messages: [
@@ -142,14 +146,34 @@ async function getAIResponse(prompt: string): Promise<Array<{
       ],
     });
 
+    console.log("API Response metadata:", {
+      id: response.id,
+      model: response.model,
+      finish_reason: response.choices[0].finish_reason,
+      usage: response.usage,
+    });
+
     res = response.choices[0].message?.content?.trim() || "{}";
-    console.log("Raw AI Response:", res.substring(0, 500)); // Log first 500 chars
+    console.log(`Raw AI Response (${res.length} chars):`, res.substring(0, 1000));
+    
+    // Handle empty or malformed responses
+    if (res === "{}") {
+      console.warn("AI returned empty object, treating as no reviews");
+      return [];
+    }
     
     // Try to extract JSON from the response if it's wrapped in markdown or text
     let jsonStr = res;
-    const jsonMatch = res.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      jsonStr = jsonMatch[0];
+    
+    // Check for JSON code blocks
+    const codeBlockMatch = res.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+    if (codeBlockMatch) {
+      jsonStr = codeBlockMatch[1];
+    } else {
+      const jsonMatch = res.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        jsonStr = jsonMatch[0];
+      }
     }
     
     const parsed = JSON.parse(jsonStr);
@@ -157,7 +181,7 @@ async function getAIResponse(prompt: string): Promise<Array<{
     return parsed.reviews || [];
   } catch (error) {
     console.error("Error in getAIResponse:", error);
-    console.error("Failed response text:", res.substring(0, 500));
+    console.error("Failed response text:", res.substring(0, 1000));
     return null;
   }
 }
@@ -198,6 +222,9 @@ async function createReviewComment(
 }
 
 async function main() {
+  console.log("=== AI Code Reviewer Started ===");
+  console.log(`Model: ${OPENAI_API_MODEL}`);
+  
   const prDetails = await getPRDetails();
   let diff: string | null;
   const eventData = JSON.parse(
