@@ -130,7 +130,7 @@ async function getAIResponse(prompt: string): Promise<Array<{
 }> | null> {
   const queryConfig = {
     model: OPENAI_API_MODEL,
-    max_completion_tokens: 2000, // Increased from 700
+    max_completion_tokens: 16000, // High limit for reasoning models (gpt-5, o1) that use reasoning_tokens
   };
 
   let res = "{}";
