@@ -15619,17 +15619,21 @@ function analyzeCode(parsedDiff, prDetails) {
         for (const file of parsedDiff) {
             if (file.to === "/dev/null")
                 continue; // Ignore deleted files
+            console.log(`Analyzing file: ${file.to}`);
             for (const chunk of file.chunks) {
                 const prompt = createPrompt(file, chunk, prDetails);
                 const aiResponse = yield getAIResponse(prompt);
+                console.log(`AI Response for ${file.to}:`, JSON.stringify(aiResponse));
                 if (aiResponse) {
                     const newComments = createComment(file, chunk, aiResponse);
                     if (newComments) {
+                        console.log(`Generated ${newComments.length} comments for ${file.to}`);
                         comments.push(...newComments);
                     }
                 }
             }
         }
+        console.log(`Total comments generated: ${comments.length}`);
         return comments;
     });
 }
@@ -15679,10 +15683,13 @@ function getAIResponse(prompt) {
                     },
                 ] }));
             const res = ((_b = (_a = response.choices[0].message) === null || _a === void 0 ? void 0 : _a.content) === null || _b === void 0 ? void 0 : _b.trim()) || "{}";
-            return JSON.parse(res).reviews;
+            console.log("Raw AI Response:", res);
+            const parsed = JSON.parse(res);
+            console.log("Parsed AI Response:", JSON.stringify(parsed));
+            return parsed.reviews;
         }
         catch (error) {
-            console.error("Error:", error);
+            console.error("Error in getAIResponse:", error);
             return null;
         }
     });
@@ -15749,9 +15756,16 @@ function main() {
         const filteredDiff = parsedDiff.filter((file) => {
             return !excludePatterns.some((pattern) => { var _a; return (0, minimatch_1.default)((_a = file.to) !== null && _a !== void 0 ? _a : "", pattern); });
         });
+        console.log(`Found ${parsedDiff.length} files in diff, ${filteredDiff.length} after filtering`);
+        console.log(`Files to analyze: ${filteredDiff.map(f => f.to).join(", ")}`);
         const comments = yield analyzeCode(filteredDiff, prDetails);
         if (comments.length > 0) {
+            console.log(`Posting ${comments.length} review comments...`);
             yield createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
+            console.log("Review comments posted successfully!");
+        }
+        else {
+            console.log("No issues found - code looks good! ✓");
         }
     });
 }

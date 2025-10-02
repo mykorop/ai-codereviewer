@@ -64,17 +64,21 @@ async function analyzeCode(
 
   for (const file of parsedDiff) {
     if (file.to === "/dev/null") continue; // Ignore deleted files
+    console.log(`Analyzing file: ${file.to}`);
     for (const chunk of file.chunks) {
       const prompt = createPrompt(file, chunk, prDetails);
       const aiResponse = await getAIResponse(prompt);
+      console.log(`AI Response for ${file.to}:`, JSON.stringify(aiResponse));
       if (aiResponse) {
         const newComments = createComment(file, chunk, aiResponse);
         if (newComments) {
+          console.log(`Generated ${newComments.length} comments for ${file.to}`);
           comments.push(...newComments);
         }
       }
     }
   }
+  console.log(`Total comments generated: ${comments.length}`);
   return comments;
 }
 
@@ -135,9 +139,12 @@ async function getAIResponse(prompt: string): Promise<Array<{
     });
 
     const res = response.choices[0].message?.content?.trim() || "{}";
-    return JSON.parse(res).reviews;
+    console.log("Raw AI Response:", res);
+    const parsed = JSON.parse(res);
+    console.log("Parsed AI Response:", JSON.stringify(parsed));
+    return parsed.reviews;
   } catch (error) {
-    console.error("Error:", error);
+    console.error("Error in getAIResponse:", error);
     return null;
   }
 }
@@ -228,14 +235,21 @@ async function main() {
     );
   });
 
+  console.log(`Found ${parsedDiff.length} files in diff, ${filteredDiff.length} after filtering`);
+  console.log(`Files to analyze: ${filteredDiff.map(f => f.to).join(", ")}`);
+
   const comments = await analyzeCode(filteredDiff, prDetails);
   if (comments.length > 0) {
+    console.log(`Posting ${comments.length} review comments...`);
     await createReviewComment(
       prDetails.owner,
       prDetails.repo,
       prDetails.pull_number,
       comments
     );
+    console.log("Review comments posted successfully!");
+  } else {
+    console.log("No issues found - code looks good! ✓");
   }
 }
 
