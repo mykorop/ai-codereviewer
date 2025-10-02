@@ -15646,25 +15646,26 @@ function analyzeCode(parsedDiff, prDetails) {
     });
 }
 function createPrompt(file, chunk, prDetails) {
-    return `Your task is to review pull requests. Instructions:
-- Provide the response in following JSON format:  {"reviews": [{"lineNumber":  <line_number>, "reviewComment": "<review comment>"}]}
-- Do not give positive comments or compliments.
-- Provide comments and suggestions ONLY if there is something to improve, otherwise "reviews" should be an empty array.
-- Write the comment in GitHub Markdown format.
-- Use the given description only for the overall context and only comment the code.
-- IMPORTANT: NEVER suggest adding comments to the code.
+    return `You are a code reviewer. Review the following code changes and provide feedback.
 
-Review the following code diff in the file "${file.to}" and take the pull request title and description into account when writing the response.
-  
-Pull request title: ${prDetails.title}
-Pull request description:
+IMPORTANT: You must respond with ONLY a valid JSON object in this exact format:
+{"reviews": [{"lineNumber": <line_number>, "reviewComment": "<review comment>"}]}
 
----
-${prDetails.description}
----
+Rules:
+- If there are issues to address, include them in the "reviews" array
+- If the code looks good, return: {"reviews": []}
+- Do not give positive comments or compliments
+- Do not suggest adding comments to the code
+- Write review comments in GitHub Markdown format
+- Each review must have a "lineNumber" (number) and "reviewComment" (string)
 
-Git diff to review:
+Pull Request Context:
+Title: ${prDetails.title}
+Description: ${prDetails.description || "No description provided"}
 
+File: ${file.to}
+
+Code Changes:
 \`\`\`diff
 ${chunk.content}
 ${chunk.changes
@@ -15672,7 +15673,8 @@ ${chunk.changes
         .map((c) => `${c.ln ? c.ln : c.ln2} ${c.content}`)
         .join("\n")}
 \`\`\`
-`;
+
+Respond with ONLY the JSON object, no other text:`;
 }
 function getAIResponse(prompt) {
     var _a, _b;
@@ -15681,23 +15683,29 @@ function getAIResponse(prompt) {
             model: OPENAI_API_MODEL,
             max_completion_tokens: 700,
         };
+        let res = "{}";
         try {
-            const response = yield openai.chat.completions.create(Object.assign(Object.assign(Object.assign({}, queryConfig), (OPENAI_API_MODEL === "gpt-4-1106-preview"
-                ? { response_format: { type: "json_object" } }
-                : {})), { messages: [
+            const response = yield openai.chat.completions.create(Object.assign(Object.assign({}, queryConfig), { messages: [
                     {
-                        role: "system",
+                        role: "user",
                         content: prompt,
                     },
                 ] }));
-            const res = ((_b = (_a = response.choices[0].message) === null || _a === void 0 ? void 0 : _a.content) === null || _b === void 0 ? void 0 : _b.trim()) || "{}";
-            console.log("Raw AI Response:", res);
-            const parsed = JSON.parse(res);
+            res = ((_b = (_a = response.choices[0].message) === null || _a === void 0 ? void 0 : _a.content) === null || _b === void 0 ? void 0 : _b.trim()) || "{}";
+            console.log("Raw AI Response:", res.substring(0, 500)); // Log first 500 chars
+            // Try to extract JSON from the response if it's wrapped in markdown or text
+            let jsonStr = res;
+            const jsonMatch = res.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+                jsonStr = jsonMatch[0];
+            }
+            const parsed = JSON.parse(jsonStr);
             console.log("Parsed AI Response:", JSON.stringify(parsed));
-            return parsed.reviews;
+            return parsed.reviews || [];
         }
         catch (error) {
             console.error("Error in getAIResponse:", error);
+            console.error("Failed response text:", res.substring(0, 500));
             return null;
         }
     });
